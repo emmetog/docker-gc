@@ -22,15 +22,33 @@ anything that shouldn't be deleted.
 Usage
 =====
 
-To remove only containers which have the word "web" in their name, and only images which have "nginx" in their tag:
+Pruning Containers
+-------------------
+
+Use the `--containers=""` flag to specify a regex of the containers to remove.
+
+To remove only containers with "web" in their name, use this:
 ```
-$ docker run -v /var/run/docker.sock:/var/run/docker.sock emmetog/docker-gc --containers="web" --images="nginx" --dry-run
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock emmetog/docker-gc --containers="web" --dry-run
 ```
+
+Pruning Images
+-------------------
+
+Use the `--images=""` flag to specify a regex of the images to remove.
+
+To remove only images with "nginx" in their name, use this:
+```
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock emmetog/docker-gc --images="web" --dry-run
+```
+
+Pruning Dangling Images
+-----------------------
 
 By default, dangling containers will be cleaned up at the end of the process. To stop this behaviour, use
 the `--no-prune-dangling` flag, for example:
 ```
-$ docker run -v /var/run/docker.sock:/var/run/docker.sock emmetog/docker-gc --containers="web" --images="nginx" --no-prune-dangling --dry-run
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock emmetog/docker-gc --no-prune-dangling --dry-run
 ```
 
 You can use regexes, to remove ALL containers and images for example:
