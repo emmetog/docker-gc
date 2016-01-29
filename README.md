@@ -22,6 +22,18 @@ anything that shouldn't be deleted.
 Usage
 =====
 
+To remove all containers and images:
 ```
-$ docker run 
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock docker-gc --containers ".*" --images ".*" --dry-run
+```
+
+To remove only containers which have the word "web" in their name, and only images which have "nginx" in their tag:
+```
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock docker-gc --containers "web" --images "nginx" --dry-run
+```
+
+By default, dangling containers will be cleaned up at the end of the process. To stop this behaviour, use
+the `--no-prune-dangling-images` flag, for example:
+```
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock docker-gc --containers="web" --images="nginx" --no-prune-dangling --dry-run
 ```

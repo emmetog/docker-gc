@@ -3,11 +3,13 @@
 set -o errexit
 
 CONTAINERS_TO_PRUNE=""
+CLEANUP_DANGLING_IMAGES=true
 DRY_RUN=false
 DOCKER=docker
 IMAGES_TO_PRUNE=""
 PID_DIR=/var/run
 STATE_DIR=/var/lib/docker-gc
+VERBOSE=false
 
 for pid in $(pidof -s docker-gc); do
     if [[ $pid != $$ ]]; then
@@ -22,74 +24,60 @@ echo $$ > $PID_DIR/dockergc
 
 
 
-while [[ $# > 0 ]]
+for i in "$@"
 do
-    key="$1"
-
-    case $key in
-        -n|--dry-run)
+    case $i in
+        -d|--dry-run)
             DRY_RUN=true
         ;;
         -v|--verbose)
-            verbose=true
+            VERBOSE=true
         ;;
-        -c|--containers)
-            CONTAINERS_TO_PRUNE="$2"
-            shift # past argument
+        --no-prune-dangling-images)
+            CLEANUP_DANGLING_IMAGES=false
         ;;
-        -i|--images)
-            IMAGES_TO_PRUNE="$2"
-            shift # past argument
+        -c=*|--containers=*)
+            CONTAINERS_TO_PRUNE="${i#*=}"
+        ;;
+        -i=*|--images=*)
+            IMAGES_TO_PRUNE="${i#*=}"
         ;;
         *)
             echo "Docker garbage collection: remove unused containers and images."
-            echo "Usage: ${0##*/} [--dry-run] [--verbose]"
-            echo "   -n, --dry-run: dry run: display what would get removed."
-            echo "   -v, --verbose: verbose output."
+            echo "Usage: ${0##*/} [--containers=\"\"] [--images=\"\"] [--no-prune-dangling] [--verbose] [--dry-run]"
+            echo "   -c, --containers:      a regular expression to match the containers to prune."
+            echo "   -i, --images:          a regular expression to match the images to prune."
+            echo "   --no-prune-dangling:   don't prune dangling images."
+            echo "   -d, --dry-run:         dry run: display what would get removed."
+            echo "   -v, --verbose:         verbose output."
             exit 1
         ;;
     esac
     shift
 done
 
-
-
 # Get containers to remove from the variable
-if [ -z $CONTAINERS_TO_PRUNE ] && [ -z $IMAGES_TO_PRUNE ]; then
-    echo "No CONTAINERS_TO_PRUNE or IMAGES_TO_PRUNE, specify regexes in order to select containers and images for pruning";
+if [ -z "$CONTAINERS_TO_PRUNE" ] && [ -z "$IMAGES_TO_PRUNE" ]; then
+    echo "No --containers or --images specified, specify regexes in order to select containers and images for pruning";
     exit 0
 fi
 
-echo "Pruning containers that match this regex: $CONTAINERS_TO_PRUNE"
-echo "Pruning unused images that match this regex: $IMAGES_TO_PRUNE"
+echo "---------------------------------"
+echo "Will prune containers that match this regex: $CONTAINERS_TO_PRUNE"
+echo "Will prune unused images that match this regex: $IMAGES_TO_PRUNE"
+if [ $CLEANUP_DANGLING_IMAGES = true ]; then
+    echo "Will prune dangling images"
+else
+    echo "Will NOT prune dangling images"
+fi
+echo "---------------------------------"
 
-function compute_exclude_ids() {
-    # Find images that match patterns in the EXCLUDE_FROM_GC file and put their
-    # id prefixes into $INCLUDE_IDS_FILE, prefixed with ^
-
-    PROCESSED_INCLUDES="processed_includes.tmp"
-    # Take each line and put a space at the beginning and end, so when we
-    # grep for them below, it will effectively be: "match either repo:tag
-    # or imageid".  Also delete blank lines or lines that only contain
-    # whitespace
-    echo $IMAGES_TO_PRUNE | sed 's/^\(.*\)$/ \1 /' | sed '/^ *$/d' > $PROCESSED_INCLUDES
-
-    # The following looks a bit of a mess, but here's what it does:
-    # 1. Get images
-    # 2. Skip header line
-    # 3. Turn columnar display of 'REPO TAG IMAGEID ....' to 'REPO:TAG IMAGEID'
-    # 4. find lines that contain things mentioned in PROCESSED_EXCLUDES
-    # 5. Grab the image id from the line
-    # 6. Prepend ^ to the beginning of each line
-
-    # What this does is make grep patterns to match image ids mentioned by
-    # either repo:tag or image id for later greppage
-    $DOCKER images \
-        | tail -n+2 \
-        | sed 's/^\([^ ]*\) *\([^ ]*\) *\([^ ]*\).*/ \1:\2 \3 /' \
-        | grep -f $PROCESSED_INCLUDES 2>/dev/null \
-        | cut -d' ' -f3 \
-        | sed 's/^/^/' > images.keep
+function calculate_images_to_reap() {
+    $DOCKER images --no-trunc \
+         | tail -n+2 \
+         | sed 's/^\([^ ]*\) *\([^ ]*\) *\([^ ]*\).*/ \1:\2 \3 /' \
+         | grep "$IMAGES_TO_PRUNE" \
+         | cut -d' ' -f3 > images.reap
 }
 
 function date_parse {
@@ -114,6 +102,11 @@ function elapsed_time() {
     echo $(($utcnow - $epoch))
 }
 
+function log_verbose() {
+    if [ $VERBOSE != false ]; then
+        log "$1"
+    fi
+}
 function log() {
     echo "$1"
 }
@@ -124,7 +117,7 @@ function container_log() {
 
     while IFS='' read -r containerid
     do
-        log "$prefix $containerid $(docker inspect -f {{.Name}} $containerid)"
+        log_verbose "$prefix $containerid $(docker inspect -f {{.Name}} $containerid)"
     done < "$filename"
 }
 
@@ -134,10 +127,13 @@ function image_log() {
 
     while IFS='' read -r imageid
     do
-        log "$prefix $imageid $(docker inspect -f {{.RepoTags}} $imageid)"
+        log_verbose "$prefix $imageid $(docker inspect -f {{.RepoTags}} $imageid)"
     done < "$filename"
 }
 
+function get_image_name_from_id() {
+    echo `$DOCKER inspect -f "{{index .RepoTags 0}}" "$1" 2> /dev/null || echo ""`
+}
 # Verify that docker is reachable
 $DOCKER version 1>/dev/null
 
@@ -176,13 +172,13 @@ do
             EXITED=$(${DOCKER} inspect -f "{{json .State.FinishedAt}}" ${line})
             ELAPSED=$(elapsed_time $EXITED)
             if [[ $ELAPSED -gt $GRACE_PERIOD_SECONDS ]]; then
-                echo "Marking container $line for removal ($CONTAINER_NAME)"
+                log_verbose "Marking container $line for removal ($CONTAINER_NAME)"
                 echo $line >> containers.reap.tmp
             else
-                echo "Container $line is stopped but is not old enough, not pruning"
+                log_verbose "Container $line is stopped but is not old enough, not pruning"
             fi
         else
-            echo "Container $CONTAINER_NAME does not match container regex"
+            log_verbose "Container $CONTAINER_NAME does not match container regex"
         fi
     done
 done
@@ -201,54 +197,62 @@ sort | uniq > images.used
 
 # ----------- COLLECT IMAGES -------------#
 
-compute_exclude_ids
+calculate_images_to_reap
 
-$DOCKER images -q --no-trunc | sort | uniq > images.all
+cat images.reap
 
 # Find images that are created at least GRACE_PERIOD_SECONDS ago
 echo -n "" > images.reap.tmp
-cat images.all | while read line
+cat images.reap | while read line
 do
-    # Disregard images that don't match our regexes.
-    while read IMAGE_ID_TO_KEEP; do
-        if [[ ! $line =~ $IMAGE_ID_TO_KEEP ]]; then
-            CREATED=$(${DOCKER} inspect -f "{{.Created}}" ${line})
-            ELAPSED=$(elapsed_time $CREATED)
-            if [[ $ELAPSED -gt $GRACE_PERIOD_SECONDS ]]; then
-                echo "Marking image $line for removal ($IMAGE_NAME)"
-                echo $line >> images.reap.tmp
-            else
-                echo "Image $IMAGE_NAME is unused but is not old enough, not pruning"
-            fi
-        else
-            echo "Image $IMAGE_NAME does not match image regex"
-        fi
-    done < images.keep
+    IMAGE_NAME=`get_image_name_from_id $line`
+    CREATED=$(${DOCKER} inspect -f "{{.Created}}" ${line})
+    ELAPSED=$(elapsed_time $CREATED)
+    if [[ $ELAPSED -gt $GRACE_PERIOD_SECONDS ]]; then
+        log_verbose "Marking image for removal $line ($IMAGE_NAME)"
+        echo $line >> images.reap.tmp
+    else
+        log_verbose "Image is unused but is not old enough, not pruning $IMAGE_NAME"
+    fi
 done
-comm -23 images.reap.tmp images.used  > images.reap || true
+cat images.reap.tmp > images.reap
 
 
 
 # ----------- REAP CONTAINERS -------------#
 
 while read line; do
+    CONTAINER_NAME=$(${DOCKER} inspect -f "{{json .Name}}" ${line})
     if [[ $DRY_RUN ]]; then
-        echo "DRY RUN: Would have removed container $line"
+        log "DRY RUN: Would have removed container $line ($CONTAINER_NAME)"
     else
-        container_log "Container removed" containers.reap
-        #xargs -n 1 $DOCKER rm -f --volumes=true < containers.reap &>/dev/null || true
+        container_log "Container (and attached volumes) removed" containers.reap
+        xargs -n 1 $DOCKER rm -f --volumes=true < containers.reap &>/dev/null || true
     fi
 done < containers.reap
 
 
 
-# ----------- REAP CONTAINERS -------------#
+# ----------- REAP IMAGES -------------#
 
 while read line; do
+    IMAGE_NAME=`get_image_name_from_id $line`
     if [[ $DRY_RUN ]]; then
-        echo "DRY RUN: Would have removed image $line"
+        log "DRY RUN: Would have removed image $line ($IMAGE_NAME)"
     else
         image_log "Removing image" images.reap
         #xargs -n 1 $DOCKER rmi $FORCE_IMAGE_FLAG < images.reap &>/dev/null || true
     fi
 done < images.reap
+
+
+
+# ------------ CLEANUP DANGLING IMAGES -------------#
+if [[ $CLEANUP_DANGLING_IMAGES ]]; then
+    if [[ $DRY_RUN ]]; then
+        log "DRY RUN: Would have removed dangling images"
+    else
+        log "Removing dangling images"
+        $DOCKER rmi $($DOCKER images -q -f dangling=true)
+    fi
+fi
