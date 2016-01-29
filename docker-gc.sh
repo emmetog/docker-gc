@@ -33,7 +33,7 @@ do
         -v|--verbose)
             VERBOSE=true
         ;;
-        --no-prune-dangling-images)
+        --no-prune-dangling)
             CLEANUP_DANGLING_IMAGES=false
         ;;
         -c=*|--containers=*)
@@ -56,15 +56,19 @@ do
     shift
 done
 
-# Get containers to remove from the variable
-if [ -z "$CONTAINERS_TO_PRUNE" ] && [ -z "$IMAGES_TO_PRUNE" ]; then
-    echo "No --containers or --images specified, specify regexes in order to select containers and images for pruning";
-    exit 0
+echo "---------------------------------"
+if [ "$CONTAINERS_TO_PRUNE" != "" ]; then
+    echo "Will prune containers that match the regex \"$CONTAINERS_TO_PRUNE\""
+else
+    echo "Will NOT prune any containers (no --containers specified)"
 fi
 
-echo "---------------------------------"
-echo "Will prune containers that match this regex: $CONTAINERS_TO_PRUNE"
-echo "Will prune unused images that match this regex: $IMAGES_TO_PRUNE"
+if [ "$IMAGES_TO_PRUNE" != "" ]; then
+    echo "Will prune unused images that match the regex \"$IMAGES_TO_PRUNE\""
+else
+    echo "Will NOT prune any images (no --images specified)"
+fi
+
 if [ $CLEANUP_DANGLING_IMAGES = true ]; then
     echo "Will prune dangling images"
 else
@@ -73,6 +77,12 @@ fi
 echo "---------------------------------"
 
 function calculate_images_to_reap() {
+
+    if [ "$IMAGES_TO_PRUNE" == "" ]; then
+        touch images.reap
+        return
+    fi
+
     $DOCKER images --no-trunc \
          | tail -n+2 \
          | sed 's/^\([^ ]*\) *\([^ ]*\) *\([^ ]*\).*/ \1:\2 \3 /' \
@@ -199,8 +209,6 @@ sort | uniq > images.used
 
 calculate_images_to_reap
 
-cat images.reap
-
 # Find images that are created at least GRACE_PERIOD_SECONDS ago
 echo -n "" > images.reap.tmp
 cat images.reap | while read line
@@ -224,7 +232,7 @@ cat images.reap.tmp > images.reap
 while read line; do
     CONTAINER_NAME=$(${DOCKER} inspect -f "{{json .Name}}" ${line})
     if [[ $DRY_RUN ]]; then
-        log "DRY RUN: Would have removed container $line ($CONTAINER_NAME)"
+        log "DRY RUN: Would have removed container (and it's volumes) $line $CONTAINER_NAME"
     else
         container_log "Container (and attached volumes) removed" containers.reap
         xargs -n 1 $DOCKER rm -f --volumes=true < containers.reap &>/dev/null || true
@@ -238,7 +246,7 @@ done < containers.reap
 while read line; do
     IMAGE_NAME=`get_image_name_from_id $line`
     if [[ $DRY_RUN ]]; then
-        log "DRY RUN: Would have removed image $line ($IMAGE_NAME)"
+        log "DRY RUN: Would have removed image $line $IMAGE_NAME"
     else
         image_log "Removing image" images.reap
         #xargs -n 1 $DOCKER rmi $FORCE_IMAGE_FLAG < images.reap &>/dev/null || true
