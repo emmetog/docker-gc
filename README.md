@@ -3,14 +3,13 @@
 ##### WARNING: Use at your own risk, always test with the `--dry-run` parameter first. If it's not
 compatible with your system or Docker version it will remove all your containers and images.
 
-A simple docker container and image garbage collection script
+A simple docker container and image garbage collection script.
 
-This script is based on Spotify's docker-gc script with one difference:
-this script forces you to explicitly set container and image regexes to
-remove, instead of setting containers and images to keep.
-
-This is a lot safer, nothing is removed unless it matches a regex that
+This script forces you to explicitly set container and image regexes to
+remove. This is safer, nothing is removed unless it matches a regex that
 you specify.
+
+Only containers and images that are not used are removed.
 
 Precautions
 ===========
@@ -25,7 +24,7 @@ Usage
 Pruning Containers
 -------------------
 
-Use the `--containers=""` flag to specify a regex of the containers to remove.
+Use the `--containers` flag to specify a regex of the containers to remove.
 
 To remove only containers with "web" in their name, use this:
 ```
@@ -37,10 +36,12 @@ You can use regexes, to remove ALL containers for example:
 $ docker run -v /var/run/docker.sock:/var/run/docker.sock emmetog/docker-gc --containers=".*" --dry-run
 ```
 
+WARNING: Setting an empty regex will match everything, so using `--containers=""` WILL remove all containers.
+
 Pruning Images
 -------------------
 
-Use the `--images=""` flag to specify a regex of the images to remove.
+Use the `--images` flag to specify a regex of the images to remove.
 
 To remove only images with "nginx" in their name, use this:
 ```

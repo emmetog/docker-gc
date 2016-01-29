@@ -58,7 +58,7 @@ done
 
 echo "---------------------------------"
 if [ "$CONTAINERS_TO_PRUNE" != "" ]; then
-    echo "Will prune containers that match the regex \"$CONTAINERS_TO_PRUNE\""
+    echo "Will prune stopped containers that match the regex \"$CONTAINERS_TO_PRUNE\""
 else
     echo "Will NOT prune any containers (no --containers specified)"
 fi
@@ -231,7 +231,7 @@ cat images.reap.tmp > images.reap
 
 while read line; do
     CONTAINER_NAME=$(${DOCKER} inspect -f "{{json .Name}}" ${line})
-    if [[ $DRY_RUN ]]; then
+    if [[ $DRY_RUN == true ]]; then
         log "DRY RUN: Would have removed container (and it's volumes) $line $CONTAINER_NAME"
     else
         container_log "Container (and attached volumes) removed" containers.reap
@@ -245,7 +245,7 @@ done < containers.reap
 
 while read line; do
     IMAGE_NAME=`get_image_name_from_id $line`
-    if [[ $DRY_RUN ]]; then
+    if [[ $DRY_RUN == true ]]; then
         log "DRY RUN: Would have removed image $line $IMAGE_NAME"
     else
         image_log "Removing image" images.reap
@@ -257,7 +257,7 @@ done < images.reap
 
 # ------------ CLEANUP DANGLING IMAGES -------------#
 if [[ $CLEANUP_DANGLING_IMAGES ]]; then
-    if [[ $DRY_RUN ]]; then
+    if [[ $DRY_RUN == true ]]; then
         log "DRY RUN: Would have removed dangling images"
     else
         log "Removing dangling images"
