@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -o errexit
-
 CONTAINERS_TO_PRUNE=""
 CLEANUP_DANGLING_IMAGES=true
 DRY_RUN=false
@@ -131,16 +129,6 @@ function container_log() {
     done < "$filename"
 }
 
-function image_log() {
-    prefix=$1
-    filename=$2
-
-    while IFS='' read -r imageid
-    do
-        log_verbose "$prefix $imageid $(docker inspect -f {{.RepoTags}} $imageid)"
-    done < "$filename"
-}
-
 function get_image_name_from_id() {
     echo `$DOCKER inspect -f "{{index .RepoTags 0}}" "$1" 2> /dev/null || echo ""`
 }
@@ -234,8 +222,11 @@ while read line; do
     if [[ $DRY_RUN == true ]]; then
         log "DRY RUN: Would have removed container (and it's volumes) $line $CONTAINER_NAME"
     else
-        container_log "Container (and attached volumes) removed" containers.reap
-        xargs -n 1 $DOCKER rm -f --volumes=true < containers.reap &>/dev/null || true
+        while IFS='' read -r containerid
+        do
+            log_verbose "Removing container (and attached volumes) $containerid $(docker inspect -f {{.Name}} $containerid)"
+            $DOCKER rm -f --volumes=true $containerid &>/dev/null || true
+        done < containers.reap
     fi
 done < containers.reap
 
@@ -248,8 +239,11 @@ while read line; do
     if [[ $DRY_RUN == true ]]; then
         log "DRY RUN: Would have removed image $line $IMAGE_NAME"
     else
-        image_log "Removing image" images.reap
-        #xargs -n 1 $DOCKER rmi $FORCE_IMAGE_FLAG < images.reap &>/dev/null || true
+        while IFS='' read -r imageid
+        do
+            log_verbose "Removing image $imageid $(docker inspect -f {{.RepoTags}} $imageid)"
+            $DOCKER rmi $imageid &>/dev/null || true
+        done < images.reap
     fi
 done < images.reap
 
