@@ -255,6 +255,6 @@ if [[ $CLEANUP_DANGLING_IMAGES ]]; then
         log "DRY RUN: Would have removed dangling images"
     else
         log "Removing dangling images"
-        $DOCKER rmi $($DOCKER images -q -f dangling=true)
+        $DOCKER rmi $($DOCKER images -q -f dangling=true) || true
     fi
 fi
