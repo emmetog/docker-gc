@@ -1,7 +1,7 @@
 # docker-gc
 
-##### WARNING: Use at your own risk, always test with the `--dry-run` parameter first. If it's not
-compatible with your system or Docker version it will remove all your containers and images.
+**WARNING: Use at your own risk, always test with the `--dry-run` parameter first. If it's not
+compatible with your system or Docker version it will remove all your containers and images.**
 
 A simple docker container and image garbage collection script.
 
